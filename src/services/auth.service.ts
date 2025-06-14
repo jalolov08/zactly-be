@@ -1,4 +1,4 @@
-import { UserModel } from '../models/user.model';
+import { User } from '../models/user.model';
 import { tokenService } from './token.service';
 import { UserRole } from '../types/user.type';
 import bcrypt from 'bcrypt';
@@ -9,6 +9,7 @@ import {
   UnauthorizedError,
   InternalServerError,
   NotFoundError,
+  BadRequestError,
 } from '../utils/errors';
 import { config } from '../config';
 import { OtpModel } from '../models/otp.model';
@@ -29,10 +30,10 @@ class AuthService {
     password: string;
   }) {
     try {
-      const existingUser = await UserModel.findOne({ email });
+      const existingUser = await User.findOne({ email });
       if (existingUser) throw new ConflictError('Пользователь с таким email уже существует');
       const hashedPassword = await bcrypt.hash(password, 10);
-      const user = await UserModel.create({
+      const user = await User.create({
         name,
         surname,
         email,
@@ -44,6 +45,11 @@ class AuthService {
       await this.sendOtpToEmail(email);
       return { message: 'Пользователь создан. Проверьте email для подтверждения.' };
     } catch (error) {
+      console.error('Ошибка при регистрации через email:', error);
+      if (error instanceof ConflictError) throw error;
+      if (error instanceof NotFoundError) throw error;
+      if (error instanceof UnauthorizedError) throw error;
+      if (error instanceof BadRequestError) throw error;
       throw new InternalServerError(
         'Ошибка при регистрации через email: ' + (error as Error).message
       );
@@ -52,7 +58,7 @@ class AuthService {
 
   async verifyOtp({ email, code }: { email: string; code: string }) {
     try {
-      const user = await UserModel.findOne({ email });
+      const user = await User.findOne({ email });
       if (!user) throw new NotFoundError('Пользователь не найден');
       const otp = await OtpModel.findOne({
         user: user._id,
@@ -71,13 +77,17 @@ class AuthService {
       }
       return { message: 'OTP успешно подтвержден' };
     } catch (error) {
+      console.error('Ошибка при подтверждении OTP:', error);
+      if (error instanceof NotFoundError) throw error;
+      if (error instanceof UnauthorizedError) throw error;
+      if (error instanceof BadRequestError) throw error;
       throw new InternalServerError('Ошибка при подтверждении OTP: ' + (error as Error).message);
     }
   }
 
   async loginWithPassword({ email, password }: { email: string; password: string }) {
     try {
-      const user = await UserModel.findOne({ email });
+      const user = await User.findOne({ email });
       if (!user || !user.password) throw new UnauthorizedError('Неверный email или пароль');
       if (!user.isEmailVerified) throw new UnauthorizedError('Email не подтвержден');
       if (user.isBlocked) throw new UnauthorizedError('Пользователь заблокирован');
@@ -91,13 +101,17 @@ class AuthService {
       );
       return { user, accessToken, refreshToken };
     } catch (error) {
+      console.error('Ошибка при входе по паролю:', error);
+      if (error instanceof NotFoundError) throw error;
+      if (error instanceof UnauthorizedError) throw error;
+      if (error instanceof BadRequestError) throw error;
       throw new InternalServerError('Ошибка при входе по паролю: ' + (error as Error).message);
     }
   }
 
   async requestPasswordReset(email: string) {
     try {
-      const user = await UserModel.findOne({ email });
+      const user = await User.findOne({ email });
       if (!user) throw new NotFoundError('Пользователь не найден');
       await this.sendOtpToEmail(email);
       return { message: 'OTP для сброса пароля отправлен на email' };
@@ -118,7 +132,7 @@ class AuthService {
     newPassword: string;
   }) {
     try {
-      const user = await UserModel.findOne({ email });
+      const user = await User.findOne({ email });
       if (!user) throw new NotFoundError('Пользователь не найден');
       const otp = await OtpModel.findOne({
         user: user._id,
@@ -133,6 +147,10 @@ class AuthService {
       await user.save();
       return { message: 'Пароль успешно сброшен' };
     } catch (error) {
+      console.error('Ошибка при сбросе пароля:', error);
+      if (error instanceof NotFoundError) throw error;
+      if (error instanceof UnauthorizedError) throw error;
+      if (error instanceof BadRequestError) throw error;
       throw new InternalServerError('Ошибка при сбросе пароля: ' + (error as Error).message);
     }
   }
@@ -142,9 +160,9 @@ class AuthService {
       const ticket = await googleClient.verifyIdToken({ idToken, audience: config.googleClientId });
       const payload = ticket.getPayload();
       if (!payload || !payload.email) throw new UnauthorizedError('Google токен невалиден');
-      let user = await UserModel.findOne({ googleId: payload.sub });
+      let user = await User.findOne({ googleId: payload.sub });
       if (!user) {
-        user = await UserModel.create({
+        user = await User.create({
           name: payload.given_name || '',
           surname: payload.family_name || '',
           email: payload.email,
@@ -161,6 +179,10 @@ class AuthService {
       );
       return { user, accessToken, refreshToken };
     } catch (error) {
+      console.error('Ошибка при регистрации через Google:', error);
+      if (error instanceof NotFoundError) throw error;
+      if (error instanceof UnauthorizedError) throw error;
+      if (error instanceof BadRequestError) throw error;
       throw new InternalServerError(
         'Ошибка при регистрации через Google: ' + (error as Error).message
       );
@@ -176,9 +198,9 @@ class AuthService {
         throw new UnauthorizedError('Apple токен невалиден');
       }
       if (!payload.sub || !payload.email) throw new UnauthorizedError('Apple токен невалиден');
-      let user = await UserModel.findOne({ appleId: payload.sub });
+      let user = await User.findOne({ appleId: payload.sub });
       if (!user) {
-        user = await UserModel.create({
+        user = await User.create({
           name: payload.firstName || '',
           surname: payload.lastName || '',
           email: payload.email,
@@ -195,6 +217,10 @@ class AuthService {
       );
       return { user, accessToken, refreshToken };
     } catch (error) {
+      console.error('Ошибка при регистрации через Apple:', error);
+      if (error instanceof NotFoundError) throw error;
+      if (error instanceof UnauthorizedError) throw error;
+      if (error instanceof BadRequestError) throw error;
       throw new InternalServerError(
         'Ошибка при регистрации через Apple: ' + (error as Error).message
       );
@@ -204,9 +230,13 @@ class AuthService {
   async logout(userId: string) {
     try {
       await tokenService.deleteRefreshToken(userId);
-      await UserModel.findByIdAndUpdate(userId, { lastLogout: new Date() });
+      await User.findByIdAndUpdate(userId, { lastLogout: new Date() });
       return { message: 'Выход выполнен успешно' };
     } catch (error) {
+      console.error('Ошибка при выходе:', error);
+      if (error instanceof NotFoundError) throw error;
+      if (error instanceof UnauthorizedError) throw error;
+      if (error instanceof BadRequestError) throw error;
       throw new InternalServerError('Ошибка при выходе: ' + (error as Error).message);
     }
   }
@@ -214,10 +244,10 @@ class AuthService {
   async refreshToken(refreshToken: string) {
     try {
       const payload = tokenService.verifyRefreshToken(refreshToken);
-      const user = await UserModel.findById(payload._id);
+      const user = await User.findById(payload._id);
       if (!user) throw new UnauthorizedError('Пользователь не найден');
       const now = new Date();
-      await UserModel.findByIdAndUpdate(user._id, { lastRefresh: now });
+      await User.findByIdAndUpdate(user._id, { lastRefresh: now });
       const newAccessToken = tokenService.generateAccessToken(
         user.email,
         user.role,
@@ -230,13 +260,17 @@ class AuthService {
       );
       return { accessToken: newAccessToken, refreshToken: newRefreshToken };
     } catch (error) {
+      console.error('Ошибка при обновлении токена:', error);
+      if (error instanceof NotFoundError) throw error;
+      if (error instanceof UnauthorizedError) throw error;
+      if (error instanceof BadRequestError) throw error;
       throw new InternalServerError('Ошибка при обновлении токена: ' + (error as Error).message);
     }
   }
 
   async sendOtpToEmail(email: string) {
     try {
-      const user = await UserModel.findOne({ email });
+      const user = await User.findOne({ email });
       if (!user) throw new NotFoundError('Пользователь с таким email не найден');
 
       const code = 123456;
@@ -250,6 +284,10 @@ class AuthService {
       });
       return { message: 'OTP код отправлен на email' };
     } catch (error) {
+      console.error('Ошибка при отправке OTP:', error);
+      if (error instanceof NotFoundError) throw error;
+      if (error instanceof UnauthorizedError) throw error;
+      if (error instanceof BadRequestError) throw error;
       throw new InternalServerError('Ошибка при отправке OTP: ' + (error as Error).message);
     }
   }

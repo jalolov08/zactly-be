@@ -2,7 +2,6 @@ import { Request, Response, NextFunction } from 'express';
 import { authService } from '../services/auth.service';
 import { asyncHandler } from '../utils/asyncHandler';
 import { validateFields } from '../middlewares/validation.middleware';
-import { BadRequestError } from '../utils/errors';
 
 export class AuthController {
   signUpWithEmail = [
