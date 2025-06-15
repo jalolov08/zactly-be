@@ -1,4 +1,4 @@
-import { Document } from 'mongoose';
+import { Document, Types } from 'mongoose';
 
 export enum UserRole {
   ADMIN = 'admin',
@@ -33,7 +33,8 @@ export interface IUser extends Document {
   adRevenueGenerated?: number;
 
   language?: string;
-  interests?: string[];
+
+  interests?: Types.ObjectId[];
   allowPersonalizedAds?: boolean;
 
   isEmailVerified?: boolean;

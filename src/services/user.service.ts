@@ -1,8 +1,11 @@
 import { User } from '../models/user.model';
 import { IUser, UserDevice } from '../types/user.type';
-import { NotFoundError, InternalServerError } from '../utils/errors';
+import { NotFoundError, InternalServerError, BadRequestError } from '../utils/errors';
+import { Types } from 'mongoose';
 
 class UserService {
+  private readonly MAX_INTERESTS = 5;
+
   async getUser(userId: string) {
     const user = await User.findById(userId);
     if (!user) {
@@ -54,17 +57,30 @@ class UserService {
     }
   }
 
-  async updateInterests(userId: string, interests: string[]) {
+  async updateInterests(userId: string, categoryIds: string[]) {
     try {
-      const user = await User.findByIdAndUpdate(userId, { interests }, { new: true });
+      if (categoryIds.length > this.MAX_INTERESTS) {
+        throw new BadRequestError(`Максимальное количество категорий: ${this.MAX_INTERESTS}`);
+      }
+
+      const invalidIds = categoryIds.filter((id) => !Types.ObjectId.isValid(id));
+      if (invalidIds.length > 0) {
+        throw new BadRequestError('Неверный формат ID категории');
+      }
+
+      const uniqueIds = [...new Set(categoryIds)];
+      if (uniqueIds.length !== categoryIds.length) {
+        throw new BadRequestError('Категории не должны повторяться');
+      }
+
+      const user = await User.findByIdAndUpdate(userId, { interests: uniqueIds }, { new: true });
+
       if (!user) throw new NotFoundError('Пользователь не найден');
       return user;
     } catch (error) {
-      console.error('Ошибка при обновлении интересов пользователя:', error);
-      if (error instanceof NotFoundError) throw error;
-      throw new InternalServerError(
-        'Ошибка при обновлении интересов пользователя: ' + (error as Error).message
-      );
+      console.error('Ошибка при обновлении категорий:', error);
+      if (error instanceof NotFoundError || error instanceof BadRequestError) throw error;
+      throw new InternalServerError('Ошибка при обновлении категорий: ' + (error as Error).message);
     }
   }
 
