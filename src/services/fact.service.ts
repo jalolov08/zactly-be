@@ -5,12 +5,63 @@ import { Types } from 'mongoose';
 import { User } from '../models/user.model';
 import { ViewedFact } from '../models/viewed-fact.model';
 import { Category } from '../models/category.model';
+import { redisService } from './redis.service';
 
 class FactService {
+  private readonly CACHE_TTL = 3600;
+  private readonly CACHE_PREFIX = 'fact:';
+
+  private getCacheKey(id: string): string {
+    return `${this.CACHE_PREFIX}${id}`;
+  }
+
+  private getListCacheKey(params: {
+    page: number;
+    limit: number;
+    search?: string;
+    categoryId?: string;
+    sortBy: string;
+    sortOrder: string;
+  }): string {
+    return `${this.CACHE_PREFIX}list:${JSON.stringify(params)}`;
+  }
+
+  private getFeedCacheKey(params: { limit: number; userId?: string; anonId?: string }): string {
+    return `${this.CACHE_PREFIX}feed:${JSON.stringify(params)}`;
+  }
+
+  private getCategoryFeedCacheKey(params: {
+    categoryId: string;
+    limit: number;
+    userId?: string;
+    anonId?: string;
+  }): string {
+    return `${this.CACHE_PREFIX}category-feed:${JSON.stringify(params)}`;
+  }
+
+  private async invalidateCache(id?: string): Promise<void> {
+    if (id) {
+      await redisService.del(this.getCacheKey(id));
+    }
+
+    const patterns = [
+      `${this.CACHE_PREFIX}list:*`,
+      `${this.CACHE_PREFIX}feed:*`,
+      `${this.CACHE_PREFIX}category-feed:*`,
+    ];
+
+    for (const pattern of patterns) {
+      const keys = await redisService.getKeys(pattern);
+      await redisService.deleteKeys(keys);
+    }
+  }
+
   async create(data: Partial<IFact>): Promise<IFact> {
     try {
       const fact = new Fact(data);
-      return await fact.save();
+      const savedFact = await fact.save();
+      await this.invalidateCache();
+      return savedFact;
     } catch (error) {
       console.error('Ошибка при создании факта:', error);
       throw new InternalServerError('Не удалось создать факт');
@@ -33,6 +84,7 @@ class FactService {
         throw new NotFoundError('Факт не найден');
       }
 
+      await this.invalidateCache(id);
       return fact;
     } catch (error) {
       if (error instanceof BadRequestError || error instanceof NotFoundError) {
@@ -53,6 +105,8 @@ class FactService {
       if (!fact) {
         throw new NotFoundError('Факт не найден');
       }
+
+      await this.invalidateCache(id);
     } catch (error) {
       if (error instanceof BadRequestError || error instanceof NotFoundError) {
         throw error;
@@ -71,6 +125,13 @@ class FactService {
     sortOrder: 'asc' | 'desc' = 'desc'
   ): Promise<{ facts: IFact[]; total: number }> {
     try {
+      const cacheKey = this.getListCacheKey({ page, limit, search, categoryId, sortBy, sortOrder });
+      const cachedData = await redisService.get<{ facts: IFact[]; total: number }>(cacheKey);
+
+      if (cachedData) {
+        return cachedData;
+      }
+
       const query: any = {};
 
       if (search) {
@@ -97,7 +158,9 @@ class FactService {
         Fact.countDocuments(query),
       ]);
 
-      return { facts, total };
+      const result = { facts, total };
+      await redisService.set(cacheKey, result, this.CACHE_TTL);
+      return result;
     } catch (error) {
       if (error instanceof BadRequestError) {
         throw error;
@@ -128,6 +191,16 @@ class FactService {
         throw err;
       }
     });
+
+    const patterns = [
+      `${this.CACHE_PREFIX}feed:*${userId || anonId}*`,
+      `${this.CACHE_PREFIX}category-feed:*${userId || anonId}*`,
+    ];
+
+    for (const pattern of patterns) {
+      const keys = await redisService.getKeys(pattern);
+      await redisService.deleteKeys(keys);
+    }
   }
 
   async getFeed(
@@ -137,6 +210,13 @@ class FactService {
   ): Promise<{ facts: IFact[]; hasMore: boolean }> {
     if (!userId && !anonId) {
       throw new BadRequestError('Айди пользователя или анонимный айди обязательны');
+    }
+
+    const cacheKey = this.getFeedCacheKey({ limit, userId, anonId });
+    const cachedData = await redisService.get<{ facts: IFact[]; hasMore: boolean }>(cacheKey);
+
+    if (cachedData) {
+      return cachedData;
     }
 
     let facts: IFact[] = [];
@@ -184,7 +264,9 @@ class FactService {
         _id: { $nin: facts.map((f) => f._id) },
       })) > 0;
 
-    return { facts, hasMore };
+    const result = { facts, hasMore };
+    await redisService.set(cacheKey, result, this.CACHE_TTL);
+    return result;
   }
 
   private calculateContentDiversity(facts: IFact[]): number {
@@ -209,6 +291,13 @@ class FactService {
   ): Promise<{ facts: IFact[]; hasMore: boolean }> {
     if (!userId && !anonId) {
       throw new BadRequestError('Айди пользователя или анонимный айди обязательны');
+    }
+
+    const cacheKey = this.getCategoryFeedCacheKey({ categoryId, limit, userId, anonId });
+    const cachedData = await redisService.get<{ facts: IFact[]; hasMore: boolean }>(cacheKey);
+
+    if (cachedData) {
+      return cachedData;
     }
 
     const category = await Category.findById(categoryId);
@@ -344,7 +433,9 @@ class FactService {
         _id: { $nin: facts.map((f) => f._id) },
       })) > 0;
 
-    return { facts, hasMore };
+    const result = { facts, hasMore };
+    await redisService.set(cacheKey, result, this.CACHE_TTL);
+    return result;
   }
 
   private async getUserViewingPatterns(
