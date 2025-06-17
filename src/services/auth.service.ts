@@ -60,22 +60,33 @@ class AuthService {
     try {
       const user = await User.findOne({ email });
       if (!user) throw new NotFoundError('Пользователь не найден');
+
       const otp = await OtpModel.findOne({
         user: user._id,
-        code,
-        used: false,
         expiresAt: { $gt: new Date() },
       });
+
       if (!otp) throw new UnauthorizedError('OTP не найден или истек');
-      otp.used = true;
-      await otp.save();
+
+      const isMatch = await bcrypt.compare(code, otp.code);
+      if (!isMatch) throw new UnauthorizedError('Неверный код подтверждения');
+
+      await OtpModel.findByIdAndDelete(otp._id);
+
+      const accessToken = tokenService.generateAccessToken(user.email, user.role, String(user._id));
+      const refreshToken = await tokenService.generateRefreshToken(
+        user.email,
+        user.role,
+        String(user._id)
+      );
 
       if (!user.isEmailVerified) {
         user.isEmailVerified = true;
         await user.save();
-        return { message: 'Email успешно подтвержден' };
+        return { message: 'Email успешно подтвержден', user, accessToken, refreshToken };
       }
-      return { message: 'OTP успешно подтвержден' };
+
+      return { message: 'OTP успешно подтвержден', user, accessToken, refreshToken };
     } catch (error) {
       console.error('Ошибка при подтверждении OTP:', error);
       if (error instanceof NotFoundError) throw error;
@@ -116,6 +127,8 @@ class AuthService {
       await this.sendOtpToEmail(email);
       return { message: 'OTP для сброса пароля отправлен на email' };
     } catch (error) {
+      console.error('Ошибка при отправке OTP для сброса пароля:', error);
+      if (error instanceof NotFoundError) throw error;
       throw new InternalServerError(
         'Ошибка при отправке OTP для сброса пароля: ' + (error as Error).message
       );
@@ -136,16 +149,25 @@ class AuthService {
       if (!user) throw new NotFoundError('Пользователь не найден');
       const otp = await OtpModel.findOne({
         user: user._id,
-        code,
-        used: false,
         expiresAt: { $gt: new Date() },
       });
       if (!otp) throw new UnauthorizedError('OTP не найден или истек');
-      otp.used = true;
-      await otp.save();
+
+      const isMatch = await bcrypt.compare(code, otp.code);
+      if (!isMatch) throw new UnauthorizedError('Неверный код подтверждения');
+
+      await OtpModel.findByIdAndDelete(otp._id);
+
       user.password = await bcrypt.hash(newPassword, 10);
       await user.save();
-      return { message: 'Пароль успешно сброшен' };
+      const accessToken = tokenService.generateAccessToken(user.email, user.role, String(user._id));
+      const refreshToken = await tokenService.generateRefreshToken(
+        user.email,
+        user.role,
+        String(user._id)
+      );
+
+      return { message: 'Пароль успешно сброшен', user, accessToken, refreshToken };
     } catch (error) {
       console.error('Ошибка при сбросе пароля:', error);
       if (error instanceof NotFoundError) throw error;
@@ -273,15 +295,25 @@ class AuthService {
       const user = await User.findOne({ email });
       if (!user) throw new NotFoundError('Пользователь с таким email не найден');
 
-      const code = 123456;
+      await OtpModel.deleteMany({ user: user._id });
+
+      const code = '1234';
+      const hashedCode = await bcrypt.hash(code, 10);
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-      await OtpModel.create({ user: user._id, code, expiresAt, used: false });
-      await sendMail({
-        to: email,
-        subject: 'Ваш OTP код',
-        text: `Ваш OTP код: ${code}`,
-        html: `<b>Ваш OTP код: ${code}</b>`,
+
+      await OtpModel.create({
+        user: user._id,
+        code: hashedCode,
+        expiresAt,
       });
+
+      // await sendMail({
+      //   to: email,
+      //   subject: 'Ваш OTP код',
+      //   text: `Ваш OTP код: ${code}`,
+      //   html: `<b>Ваш OTP код: ${code}</b>`,
+      // });
+
       return { message: 'OTP код отправлен на email' };
     } catch (error) {
       console.error('Ошибка при отправке OTP:', error);
@@ -289,6 +321,39 @@ class AuthService {
       if (error instanceof UnauthorizedError) throw error;
       if (error instanceof BadRequestError) throw error;
       throw new InternalServerError('Ошибка при отправке OTP: ' + (error as Error).message);
+    }
+  }
+
+  async resendOtp(email: string) {
+    try {
+      const user = await User.findOne({ email });
+      if (!user) throw new NotFoundError('Пользователь не найден');
+
+      const activeOtp = await OtpModel.findOne({
+        user: user._id,
+        expiresAt: { $gt: new Date() },
+      });
+
+      if (activeOtp) {
+        const timeLeft = Math.ceil((activeOtp.expiresAt.getTime() - Date.now()) / 1000);
+        if (timeLeft > 0) {
+          throw new BadRequestError(
+            `Подождите ${Math.floor(timeLeft / 60)} минут перед повторной отправкой кода`
+          );
+        }
+
+        await OtpModel.findByIdAndDelete(activeOtp._id);
+      }
+
+      return await this.sendOtpToEmail(email);
+    } catch (error) {
+      console.error('Ошибка при повторной отправке OTP:', error);
+      if (error instanceof NotFoundError) throw error;
+      if (error instanceof UnauthorizedError) throw error;
+      if (error instanceof BadRequestError) throw error;
+      throw new InternalServerError(
+        'Ошибка при повторной отправке OTP: ' + (error as Error).message
+      );
     }
   }
 }

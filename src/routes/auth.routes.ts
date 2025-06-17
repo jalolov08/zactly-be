@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import { authController } from '../controllers/auth.controller';
 import { authenticate } from '../middlewares/authenticate.middleware';
-import { authorize } from '../middlewares/authorize.middleware';
 
 export const authRouter = Router();
 
@@ -15,3 +14,4 @@ authRouter.post('/google', authController.signUpWithGoogle);
 authRouter.post('/apple', authController.signUpWithApple);
 authRouter.post('/logout', authenticate, authController.logout);
 authRouter.get('/refresh-token', authController.refreshToken);
+authRouter.post('/resend-otp', authController.resendOtp);

@@ -18,7 +18,7 @@ export class AuthController {
     asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
       const { email, code } = req.body;
       const result = await authService.verifyOtp({ email, code });
-      res.json(result);
+      res.status(200).json(result);
     }),
   ];
 
@@ -27,7 +27,7 @@ export class AuthController {
     asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
       const { email, password } = req.body;
       const result = await authService.loginWithPassword({ email, password });
-      res.json(result);
+      res.status(200).json(result);
     }),
   ];
 
@@ -36,7 +36,7 @@ export class AuthController {
     asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
       const { email } = req.body;
       const result = await authService.requestPasswordReset(email);
-      res.json(result);
+      res.status(200).json(result);
     }),
   ];
 
@@ -45,7 +45,7 @@ export class AuthController {
     asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
       const { email, code, newPassword } = req.body;
       const result = await authService.resetPasswordWithOtp({ email, code, newPassword });
-      res.json(result);
+      res.status(200).json(result);
     }),
   ];
 
@@ -54,7 +54,7 @@ export class AuthController {
     asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
       const { email } = req.body;
       const result = await authService.sendOtpToEmail(email);
-      res.json(result);
+      res.status(200).json(result);
     }),
   ];
 
@@ -63,7 +63,7 @@ export class AuthController {
     asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
       const { idToken } = req.body;
       const result = await authService.signUpWithGoogle({ idToken });
-      res.json(result);
+      res.status(200).json(result);
     }),
   ];
 
@@ -72,7 +72,7 @@ export class AuthController {
     asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
       const { idToken } = req.body;
       const result = await authService.signUpWithApple({ idToken });
-      res.json(result);
+      res.status(200).json(result);
     }),
   ];
 
@@ -81,7 +81,7 @@ export class AuthController {
     asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
       const { userId } = req.body;
       const result = await authService.logout(userId);
-      res.json(result);
+      res.status(200).json(result);
     }),
   ];
 
@@ -90,7 +90,16 @@ export class AuthController {
     asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
       const { refreshToken } = req.query;
       const result = await authService.refreshToken(refreshToken as string);
-      res.json(result);
+      res.status(200).json(result);
+    }),
+  ];
+
+  resendOtp = [
+    validateFields(['email']),
+    asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+      const { email } = req.body;
+      const result = await authService.resendOtp(email);
+      res.status(200).json(result);
     }),
   ];
 }

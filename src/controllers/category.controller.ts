@@ -27,12 +27,12 @@ class CategoryController {
 
   getAll = asyncHandler(async (req: Request, res: Response) => {
     const categories = await categoryService.findAll();
-    res.json(categories);
+    res.status(200).json(categories);
   });
 
   getActive = asyncHandler(async (req: Request, res: Response) => {
     const categories = await categoryService.getActiveCategories();
-    res.json(categories);
+    res.status(200).json(categories);
   });
 
   update = asyncHandler(async (req: Request, res: Response) => {
@@ -52,7 +52,7 @@ class CategoryController {
     }
 
     const category = await categoryService.update(id, updateData);
-    res.json(category);
+    res.status(200).json(category);
   });
 
   delete = asyncHandler(async (req: Request, res: Response) => {

@@ -5,7 +5,6 @@ const OtpSchema = new Schema<IOtp>({
   user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   code: { type: String, required: true },
   expiresAt: { type: Date, required: true },
-  used: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now },
 });
 
