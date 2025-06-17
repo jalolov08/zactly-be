@@ -2,7 +2,6 @@ import { Request, Response } from 'express';
 import { categoryService } from '../services/category.service';
 import { BadRequestError } from '../utils/errors';
 import { asyncHandler } from '../utils/asyncHandler';
-import path from 'path';
 
 class CategoryController {
   create = asyncHandler(async (req: Request, res: Response) => {

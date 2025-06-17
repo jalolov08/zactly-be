@@ -33,7 +33,7 @@ class AuthService {
       const existingUser = await User.findOne({ email });
       if (existingUser) throw new ConflictError('Пользователь с таким email уже существует');
       const hashedPassword = await bcrypt.hash(password, 10);
-      const user = await User.create({
+      await User.create({
         name,
         surname,
         email,

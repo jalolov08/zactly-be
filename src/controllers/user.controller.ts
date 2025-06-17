@@ -6,12 +6,12 @@ import { validateFields } from '../middlewares/validation.middleware';
 class UserController {
   getMe = asyncHandler(async (req: Request, res: Response) => {
     const user = await userService.getMe(req.user._id);
-    res.status(200).json({ success: true, data: user });
+    res.status(200).json({ success: true, user });
   });
 
   updateUser = asyncHandler(async (req: Request, res: Response) => {
     const user = await userService.updateUser(req.user._id, req.body);
-    res.status(200).json({ success: true, data: user });
+    res.status(200).json({ success: true, user });
   });
 
   deleteUser = asyncHandler(async (req: Request, res: Response) => {
@@ -26,7 +26,7 @@ class UserController {
 
     const { interests } = req.body;
     const user = await userService.updateInterests(userId, interests);
-    res.status(200).json({ success: true, data: user });
+    res.status(200).json({ success: true, user });
   });
 
   updateNotifications = asyncHandler(async (req: Request, res: Response) => {
@@ -34,7 +34,7 @@ class UserController {
 
     const { notifications } = req.body;
     const user = await userService.updateNotifications(userId, notifications);
-    res.status(200).json({ success: true, data: user });
+    res.status(200).json({ success: true, user });
   });
 
   updateDevice = [
@@ -44,7 +44,7 @@ class UserController {
 
       const { device } = req.body;
       const user = await userService.updateDevice(userId, device);
-      res.status(200).json({ success: true, data: user });
+      res.status(200).json({ success: true, user });
     }),
   ];
 
@@ -55,7 +55,7 @@ class UserController {
       const { fcmToken } = req.body;
 
       const user = await userService.updateFcmToken(userId, fcmToken);
-      res.status(200).json({ success: true, data: user });
+      res.status(200).json({ success: true, user });
     }),
   ];
 }
