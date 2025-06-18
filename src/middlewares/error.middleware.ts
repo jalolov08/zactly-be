@@ -4,7 +4,7 @@ interface CustomError extends Error {
   statusCode?: number;
 }
 
-export const errorHandler = (err: CustomError, req: Request, res: Response) => {
+export const errorHandler = (err: CustomError, req: Request, res: Response, next: NextFunction) => {
   const errorMap: { [key: string]: number } = {
     NotFoundError: 404,
     ForbiddenError: 403,
