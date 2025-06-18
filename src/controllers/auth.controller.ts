@@ -86,7 +86,6 @@ export class AuthController {
   ];
 
   refreshToken = [
-    validateFields(['refreshToken'], 'query'),
     asyncHandler(async (req: Request, res: Response) => {
       const { refreshToken } = req.query;
       const result = await authService.refreshToken(refreshToken as string);

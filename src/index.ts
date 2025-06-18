@@ -27,6 +27,8 @@ const initializeApp = async () => {
     app.use('/api', router);
     app.use(errorHandler);
 
+    app.use('/api/uploads', express.static('uploads'));
+
     app.listen(port, () => {
       console.log(`Сервер запущен на порту ${port}`);
     });

@@ -13,3 +13,4 @@ userRouter.patch('/interests', authenticate, userController.updateInterests);
 userRouter.patch('/notifications', authenticate, userController.updateNotifications);
 userRouter.patch('/device', authenticate, userController.updateDevice);
 userRouter.patch('/fcm-token', authenticate, userController.updateFcmToken);
+userRouter.patch('/personalized-ads', authenticate, userController.updatePersonalizedAds);

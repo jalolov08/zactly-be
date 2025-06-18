@@ -129,6 +129,21 @@ class UserService {
       );
     }
   }
+
+  async updatePersonalizedAds(userId: string, allowPersonalizedAds: boolean) {
+    try {
+      const user = await User.findByIdAndUpdate(userId, { allowPersonalizedAds }, { new: true });
+      if (!user) throw new NotFoundError('Пользователь не найден');
+      return user;
+    } catch (error) {
+      console.error('Ошибка при обновлении персонализированной рекламы пользователя:', error);
+      if (error instanceof NotFoundError) throw error;
+      throw new InternalServerError(
+        'Ошибка при обновлении персонализированной рекламы пользователя: ' +
+          (error as Error).message
+      );
+    }
+  }
 }
 
 export const userService = new UserService();

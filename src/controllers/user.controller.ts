@@ -58,6 +58,15 @@ class UserController {
       res.status(200).json({ success: true, user });
     }),
   ];
+
+  updatePersonalizedAds = [
+    asyncHandler(async (req: Request, res: Response) => {
+      const userId = req.user._id;
+      const { allowPersonalizedAds } = req.body;
+      const user = await userService.updatePersonalizedAds(userId, allowPersonalizedAds);
+      res.status(200).json({ success: true, user });
+    }),
+  ];
 }
 
 export const userController = new UserController();
