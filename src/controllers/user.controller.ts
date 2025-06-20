@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { userService } from '../services/user.service';
 import { asyncHandler } from '../utils/asyncHandler';
 import { validateFields } from '../middlewares/validation.middleware';
+import { UserDevice } from '../types/user.type';
 
 class UserController {
   getMe = asyncHandler(async (req: Request, res: Response) => {
@@ -67,6 +68,32 @@ class UserController {
       res.status(200).json({ success: true, user });
     }),
   ];
+
+  incrementAdClick = asyncHandler(async (req: Request, res: Response) => {
+    const userId = req.user._id;
+    const user = await userService.incrementAdClickCount(userId);
+    res.status(200).json({ success: true, user });
+  });
+
+  getUsers = [
+    asyncHandler(async (req: Request, res: Response) => {
+      const { page, limit, search, device } = req.query;
+      const users = await userService.getUsers(
+        Number(page),
+        Number(limit),
+        String(search),
+        String(device) as UserDevice
+      );
+      res.status(200).json(users);
+    }),
+  ];
+
+  toggleUserBlock = asyncHandler(async (req: Request, res: Response) => {
+    const userId = req.params.userId;
+    const { isBlocked } = req.body;
+    const user = await userService.toggleUserBlock(userId, isBlocked);
+    res.status(200).json({ success: true, user });
+  });
 }
 
 export const userController = new UserController();

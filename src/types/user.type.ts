@@ -45,4 +45,5 @@ export interface IUser extends Document {
   lastLogout?: Date;
   lastRefresh?: Date;
   refreshTokenVersion?: number;
+  lastProfileUpdate?: Date;
 }

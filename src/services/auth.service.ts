@@ -1,6 +1,7 @@
 import { User } from '../models/user.model';
 import { tokenService } from './token.service';
-import { UserRole } from '../types/user.type';
+import { userService } from './user.service';
+import { UserRole, UserDevice } from '../types/user.type';
 import bcrypt from 'bcrypt';
 import { OAuth2Client } from 'google-auth-library';
 import verifyAppleToken from 'verify-apple-id-token';
@@ -56,7 +57,21 @@ class AuthService {
     }
   }
 
-  async verifyOtp({ email, code }: { email: string; code: string }) {
+  async verifyOtp({
+    email,
+    code,
+    device = UserDevice.ANDROID,
+    locationData,
+  }: {
+    email: string;
+    code: string;
+    device?: UserDevice;
+    locationData?: {
+      country?: string;
+      city?: string;
+      timezone?: string;
+    };
+  }) {
     try {
       const user = await User.findOne({ email });
       if (!user) throw new NotFoundError('Пользователь не найден');
@@ -72,6 +87,8 @@ class AuthService {
       if (!isMatch) throw new UnauthorizedError('Неверный код подтверждения');
 
       await OtpModel.findByIdAndDelete(otp._id);
+
+      await userService.updateLoginStats(String(user._id), device, locationData);
 
       const accessToken = tokenService.generateAccessToken(user.email, user.role, String(user._id));
       const refreshToken = await tokenService.generateRefreshToken(
@@ -96,14 +113,32 @@ class AuthService {
     }
   }
 
-  async loginWithPassword({ email, password }: { email: string; password: string }) {
+  async loginWithPassword({
+    email,
+    password,
+    device = UserDevice.ANDROID,
+    locationData,
+  }: {
+    email: string;
+    password: string;
+    device?: UserDevice;
+    locationData?: {
+      country?: string;
+      city?: string;
+      timezone?: string;
+    };
+  }) {
     try {
       const user = await User.findOne({ email });
       if (!user || !user.password) throw new UnauthorizedError('Неверный email или пароль');
+      if (!user.isBlocked) throw new UnauthorizedError('Пользователь заблокирован');
       if (!user.isEmailVerified) throw new UnauthorizedError('Email не подтвержден');
       if (user.isBlocked) throw new UnauthorizedError('Пользователь заблокирован');
       const isMatch = await bcrypt.compare(password, user.password);
       if (!isMatch) throw new UnauthorizedError('Неверный email или пароль');
+
+      await userService.updateLoginStats(String(user._id), device, locationData);
+
       const accessToken = tokenService.generateAccessToken(user.email, user.role, String(user._id));
       const refreshToken = await tokenService.generateRefreshToken(
         user.email,
@@ -139,10 +174,18 @@ class AuthService {
     email,
     code,
     newPassword,
+    device = UserDevice.ANDROID,
+    locationData,
   }: {
     email: string;
     code: string;
     newPassword: string;
+    device?: UserDevice;
+    locationData?: {
+      country?: string;
+      city?: string;
+      timezone?: string;
+    };
   }) {
     try {
       const user = await User.findOne({ email });
@@ -160,6 +203,9 @@ class AuthService {
 
       user.password = await bcrypt.hash(newPassword, 10);
       await user.save();
+
+      await userService.updateLoginStats(String(user._id), device, locationData);
+
       const accessToken = tokenService.generateAccessToken(user.email, user.role, String(user._id));
       const refreshToken = await tokenService.generateRefreshToken(
         user.email,
@@ -177,12 +223,25 @@ class AuthService {
     }
   }
 
-  async signUpWithGoogle({ idToken }: { idToken: string }) {
+  async signUpWithGoogle({
+    idToken,
+    device = UserDevice.ANDROID,
+    locationData,
+  }: {
+    idToken: string;
+    device?: UserDevice;
+    locationData?: {
+      country?: string;
+      city?: string;
+      timezone?: string;
+    };
+  }) {
     try {
       const ticket = await googleClient.verifyIdToken({ idToken, audience: config.googleClientId });
       const payload = ticket.getPayload();
       if (!payload || !payload.email) throw new UnauthorizedError('Google токен невалиден');
       let user = await User.findOne({ googleId: payload.sub });
+      if (user?.isBlocked) throw new UnauthorizedError('Пользователь заблокирован');
       if (!user) {
         user = await User.create({
           name: payload.given_name || '',
@@ -193,6 +252,9 @@ class AuthService {
           role: UserRole.USER,
         });
       }
+
+      await userService.updateLoginStats(String(user._id), device, locationData);
+
       const accessToken = tokenService.generateAccessToken(user.email, user.role, String(user._id));
       const refreshToken = await tokenService.generateRefreshToken(
         user.email,
@@ -211,7 +273,19 @@ class AuthService {
     }
   }
 
-  async signUpWithApple({ idToken }: { idToken: string }) {
+  async signUpWithApple({
+    idToken,
+    device = UserDevice.ANDROID,
+    locationData,
+  }: {
+    idToken: string;
+    device?: UserDevice;
+    locationData?: {
+      country?: string;
+      city?: string;
+      timezone?: string;
+    };
+  }) {
     try {
       let payload;
       try {
@@ -221,6 +295,7 @@ class AuthService {
       }
       if (!payload.sub || !payload.email) throw new UnauthorizedError('Apple токен невалиден');
       let user = await User.findOne({ appleId: payload.sub });
+      if (user?.isBlocked) throw new UnauthorizedError('Пользователь заблокирован');
       if (!user) {
         user = await User.create({
           name: payload.firstName || '',
@@ -231,6 +306,9 @@ class AuthService {
           role: UserRole.USER,
         });
       }
+
+      await userService.updateLoginStats(String(user._id), device, locationData);
+
       const accessToken = tokenService.generateAccessToken(user.email, user.role, String(user._id));
       const refreshToken = await tokenService.generateRefreshToken(
         user.email,
@@ -252,7 +330,7 @@ class AuthService {
   async logout(userId: string) {
     try {
       await tokenService.deleteRefreshToken(userId);
-      await User.findByIdAndUpdate(userId, { lastLogout: new Date() });
+      await userService.updateLogoutStats(userId);
       return { message: 'Выход выполнен успешно' };
     } catch (error) {
       console.error('Ошибка при выходе:', error);
@@ -268,6 +346,7 @@ class AuthService {
       const payload = tokenService.verifyRefreshToken(refreshToken);
       const user = await User.findById(payload._id);
       if (!user) throw new UnauthorizedError('Пользователь не найден');
+      if (user.isBlocked) throw new UnauthorizedError('Пользователь заблокирован');
       const now = new Date();
       await User.findByIdAndUpdate(user._id, { lastRefresh: now });
       const newAccessToken = tokenService.generateAccessToken(

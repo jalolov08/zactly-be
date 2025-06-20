@@ -16,8 +16,8 @@ export class AuthController {
   verifyOtp = [
     validateFields(['email', 'code']),
     asyncHandler(async (req: Request, res: Response) => {
-      const { email, code } = req.body;
-      const result = await authService.verifyOtp({ email, code });
+      const { email, code, device, locationData } = req.body;
+      const result = await authService.verifyOtp({ email, code, device, locationData });
       res.status(200).json(result);
     }),
   ];
@@ -25,8 +25,13 @@ export class AuthController {
   loginWithPassword = [
     validateFields(['email', 'password']),
     asyncHandler(async (req: Request, res: Response) => {
-      const { email, password } = req.body;
-      const result = await authService.loginWithPassword({ email, password });
+      const { email, password, device, locationData } = req.body;
+      const result = await authService.loginWithPassword({
+        email,
+        password,
+        device,
+        locationData,
+      });
       res.status(200).json(result);
     }),
   ];
@@ -43,8 +48,14 @@ export class AuthController {
   resetPasswordWithOtp = [
     validateFields(['email', 'code', 'newPassword']),
     asyncHandler(async (req: Request, res: Response) => {
-      const { email, code, newPassword } = req.body;
-      const result = await authService.resetPasswordWithOtp({ email, code, newPassword });
+      const { email, code, newPassword, device, locationData } = req.body;
+      const result = await authService.resetPasswordWithOtp({
+        email,
+        code,
+        newPassword,
+        device,
+        locationData,
+      });
       res.status(200).json(result);
     }),
   ];
@@ -61,8 +72,12 @@ export class AuthController {
   signUpWithGoogle = [
     validateFields(['idToken']),
     asyncHandler(async (req: Request, res: Response) => {
-      const { idToken } = req.body;
-      const result = await authService.signUpWithGoogle({ idToken });
+      const { idToken, device, locationData } = req.body;
+      const result = await authService.signUpWithGoogle({
+        idToken,
+        device,
+        locationData,
+      });
       res.status(200).json(result);
     }),
   ];
@@ -70,8 +85,12 @@ export class AuthController {
   signUpWithApple = [
     validateFields(['idToken']),
     asyncHandler(async (req: Request, res: Response) => {
-      const { idToken } = req.body;
-      const result = await authService.signUpWithApple({ idToken });
+      const { idToken, device, locationData } = req.body;
+      const result = await authService.signUpWithApple({
+        idToken,
+        device,
+        locationData,
+      });
       res.status(200).json(result);
     }),
   ];

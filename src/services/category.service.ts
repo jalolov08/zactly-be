@@ -1,6 +1,6 @@
 import { Category } from '../models/category.model';
 import { ICategory } from '../types/category.type';
-import { Types } from 'mongoose';
+import { FilterQuery, Types } from 'mongoose';
 import {
   NotFoundError,
   BadRequestError,
@@ -49,7 +49,7 @@ class CategoryService {
     }
   }
 
-  async findAll(query: any = {}): Promise<ICategory[]> {
+  async findAll(query: FilterQuery<ICategory> = {}): Promise<ICategory[]> {
     try {
       const cacheKey = this.getListCacheKey(query);
       const cachedData = await redisService.get<ICategory[]>(cacheKey);

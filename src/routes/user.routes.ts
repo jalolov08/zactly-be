@@ -14,3 +14,6 @@ userRouter.patch('/notifications', authenticate, userController.updateNotificati
 userRouter.patch('/device', authenticate, userController.updateDevice);
 userRouter.patch('/fcm-token', authenticate, userController.updateFcmToken);
 userRouter.patch('/personalized-ads', authenticate, userController.updatePersonalizedAds);
+userRouter.post('/ad-click', authenticate, userController.incrementAdClick);
+userRouter.get('/', withAuth([UserRole.ADMIN]), userController.getUsers);
+userRouter.patch('/block/:userId', withAuth([UserRole.ADMIN]), userController.toggleUserBlock);

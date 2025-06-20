@@ -1,7 +1,7 @@
 import { Fact } from '../models/fact.model';
 import { IFact } from '../types/fact.type';
 import { NotFoundError, BadRequestError, InternalServerError } from '../utils/errors';
-import { Types } from 'mongoose';
+import { FilterQuery, Types } from 'mongoose';
 import { User } from '../models/user.model';
 import { ViewedFact } from '../models/viewed-fact.model';
 import { Category } from '../models/category.model';
@@ -132,7 +132,7 @@ class FactService {
         return cachedData;
       }
 
-      const query: any = {};
+      const query: FilterQuery<IFact> = {};
 
       if (search) {
         query.$or = [

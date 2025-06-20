@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 
-export const validateFields = (requiredFields: string[], type: 'body' | 'query' = 'body') => {
+export const validateFields = (requiredFields: string[]) => {
   return (req: Request, res: Response, next: NextFunction) => {
     for (const field of requiredFields) {
       if (!req.body[field]) {

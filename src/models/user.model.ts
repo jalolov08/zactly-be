@@ -28,6 +28,7 @@ const UserSchema = new Schema<IUser>(
     lastLogout: { type: Date },
     lastRefresh: { type: Date },
     refreshTokenVersion: { type: Number, default: 0 },
+    lastProfileUpdate: { type: Date },
   },
   { timestamps: true }
 );

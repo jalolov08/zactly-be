@@ -33,7 +33,7 @@ export const authenticate = (req: Request, res: Response, next: NextFunction) =>
     req.user = decoded;
 
     next();
-  } catch (error: any) {
+  } catch (error) {
     handleTokenError(error, res);
   }
 };
