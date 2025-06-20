@@ -62,7 +62,7 @@ class TokenService {
       }
 
       return { message: 'Refresh токен успешно удален' };
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error deleting refresh token:', error);
       throw new Error(error.message);
     }

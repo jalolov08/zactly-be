@@ -18,7 +18,6 @@ const UserSchema = new Schema<IUser>(
     city: { type: String },
     timezone: { type: String },
     adClickCount: { type: Number, default: 0 },
-    adRevenueGenerated: { type: Number, default: 0 },
     language: { type: String },
     interests: { type: [Schema.Types.ObjectId], ref: 'Category' },
     allowPersonalizedAds: { type: Boolean, default: true },
