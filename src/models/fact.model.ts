@@ -13,6 +13,10 @@ const factSchema = new Schema<IFact>(
       required: true,
       trim: true,
     },
+    image: {
+      type: String,
+      trim: true,
+    },
     category: {
       type: Schema.Types.ObjectId,
       ref: 'Category',

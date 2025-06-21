@@ -6,6 +6,14 @@ import { User } from '../models/user.model';
 import { ViewedFact } from '../models/viewed-fact.model';
 import { Category } from '../models/category.model';
 import { redisService } from './redis.service';
+import { categoryService } from './category.service';
+import * as fs from 'fs';
+import * as path from 'path';
+import axios from 'axios';
+
+interface IFactWithViews extends IFact {
+  views: number;
+}
 
 class FactService {
   private readonly CACHE_TTL = 3600;
@@ -56,11 +64,67 @@ class FactService {
     }
   }
 
+  private async downloadAndSaveImage(imageUrl: string): Promise<string> {
+    try {
+      // Create uploads directory if it doesn't exist
+      const uploadsDir = path.join(__dirname, '../../uploads/facts');
+      if (!fs.existsSync(uploadsDir)) {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+      }
+
+      // Download image
+      const response = await axios.get(imageUrl, {
+        responseType: 'arraybuffer',
+        timeout: 10000,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        },
+      });
+
+      // Generate unique filename
+      const fileExtension = this.getFileExtensionFromUrl(imageUrl);
+      const filename = `import_${Date.now()}_${Math.random().toString(36).substring(7)}${fileExtension}`;
+      const filePath = path.join(uploadsDir, filename);
+
+      // Save file
+      fs.writeFileSync(filePath, Buffer.from(response.data as ArrayBuffer));
+
+      // Return the relative path for database storage
+      return `/uploads/facts/${filename}`;
+    } catch (error) {
+      console.error('Error downloading image:', error);
+      throw new Error(`Не удалось загрузить изображение: ${imageUrl}`);
+    }
+  }
+
+  private getFileExtensionFromUrl(url: string): string {
+    try {
+      const urlObj = new URL(url);
+      const pathname = urlObj.pathname;
+      const extension = path.extname(pathname);
+
+      if (
+        extension &&
+        ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(extension.toLowerCase())
+      ) {
+        return extension;
+      }
+
+      // Default to .jpg if no valid extension found
+      return '.jpg';
+    } catch {
+      return '.jpg';
+    }
+  }
+
   async create(data: Partial<IFact>): Promise<IFact> {
     try {
       const fact = new Fact(data);
       const savedFact = await fact.save();
       await this.invalidateCache();
+      if (data.category) {
+        await this.updateCategoryFactsCount(data.category.toString());
+      }
       return savedFact;
     } catch (error) {
       console.error('Ошибка при создании факта:', error);
@@ -85,6 +149,10 @@ class FactService {
       }
 
       await this.invalidateCache(id);
+
+      const categoryId = (fact.category as any)._id?.toString() || fact.category.toString();
+
+      await this.updateCategoryFactsCount(categoryId);
       return fact;
     } catch (error) {
       if (error instanceof BadRequestError || error instanceof NotFoundError) {
@@ -107,6 +175,10 @@ class FactService {
       }
 
       await this.invalidateCache(id);
+
+      const categoryId = (fact.category as any)._id?.toString() || fact.category.toString();
+
+      await this.updateCategoryFactsCount(categoryId);
     } catch (error) {
       if (error instanceof BadRequestError || error instanceof NotFoundError) {
         throw error;
@@ -123,10 +195,12 @@ class FactService {
     categoryId?: string,
     sortBy: string = 'createdAt',
     sortOrder: 'asc' | 'desc' = 'desc'
-  ): Promise<{ facts: IFact[]; total: number }> {
+  ): Promise<{ facts: IFactWithViews[]; total: number }> {
     try {
       const cacheKey = this.getListCacheKey({ page, limit, search, categoryId, sortBy, sortOrder });
-      const cachedData = await redisService.get<{ facts: IFact[]; total: number }>(cacheKey);
+      const cachedData = await redisService.get<{ facts: IFactWithViews[]; total: number }>(
+        cacheKey
+      );
 
       if (cachedData) {
         return cachedData;
@@ -137,7 +211,7 @@ class FactService {
       if (search) {
         query.$or = [
           { title: { $regex: search, $options: 'i' } },
-          { content: { $regex: search, $options: 'i' } },
+          { description: { $regex: search, $options: 'i' } },
         ];
       }
 
@@ -153,12 +227,44 @@ class FactService {
       const sort: any = {};
       sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
 
-      const [facts, total] = await Promise.all([
-        Fact.find(query).populate('category', 'name').sort(sort).skip(skip).limit(limit),
-        Fact.countDocuments(query),
+      const facts = await Fact.find(query)
+        .populate('category', 'name')
+        .sort(sort)
+        .skip(skip)
+        .limit(limit)
+        .lean();
+
+      const total = await Fact.countDocuments(query);
+
+      const factIds = facts.map((fact) => fact._id);
+      const viewCounts = await ViewedFact.aggregate([
+        {
+          $match: {
+            factId: { $in: factIds },
+          },
+        },
+        {
+          $group: {
+            _id: '$factId',
+            views: { $sum: 1 },
+          },
+        },
       ]);
 
-      const result = { facts, total };
+      const viewCountMap = new Map();
+      viewCounts.forEach((item) => {
+        viewCountMap.set(item._id.toString(), item.views);
+      });
+
+      const factsWithViews: IFactWithViews[] = facts.map((fact) => {
+        const factWithViews = {
+          ...fact,
+          views: viewCountMap.get(fact._id.toString()) || 0,
+        };
+        return factWithViews as unknown as IFactWithViews;
+      });
+
+      const result = { facts: factsWithViews, total };
       await redisService.set(cacheKey, result, this.CACHE_TTL);
       return result;
     } catch (error) {
@@ -472,6 +578,176 @@ class FactService {
       averageViewDuration: 30,
       completionRate: 0.7,
     };
+  }
+
+  async getFactsCountByCategory(categoryId: string): Promise<number> {
+    try {
+      if (!Types.ObjectId.isValid(categoryId)) {
+        throw new BadRequestError('Неверный ID категории');
+      }
+
+      const cacheKey = `${this.CACHE_PREFIX}count:category:${categoryId}`;
+      const cachedCount = await redisService.get<number>(cacheKey);
+
+      if (cachedCount !== null) {
+        return cachedCount;
+      }
+
+      const count = await Fact.countDocuments({ category: categoryId });
+      await redisService.set(cacheKey, count, this.CACHE_TTL);
+      return count;
+    } catch (error) {
+      if (error instanceof BadRequestError) {
+        throw error;
+      }
+      console.error('Ошибка при получении количества фактов по категории:', error);
+      throw new InternalServerError('Не удалось получить количество фактов');
+    }
+  }
+
+  async getTotalFactsCount(): Promise<number> {
+    try {
+      const cacheKey = `${this.CACHE_PREFIX}count:total`;
+      const cachedCount = await redisService.get<number>(cacheKey);
+
+      if (cachedCount !== null) {
+        return cachedCount;
+      }
+
+      const count = await Fact.countDocuments();
+      await redisService.set(cacheKey, count, this.CACHE_TTL);
+      return count;
+    } catch (error) {
+      console.error('Ошибка при получении общего количества фактов:', error);
+      throw new InternalServerError('Не удалось получить общее количество фактов');
+    }
+  }
+
+  async updateCategoryFactsCount(categoryId: string): Promise<void> {
+    try {
+      if (!Types.ObjectId.isValid(categoryId)) {
+        throw new BadRequestError('Неверный ID категории');
+      }
+
+      const count = await Fact.countDocuments({ category: categoryId });
+      await Category.findByIdAndUpdate(categoryId, { factsCount: count });
+
+      await redisService.del(`${this.CACHE_PREFIX}count:category:${categoryId}`);
+      await redisService.del(`${this.CACHE_PREFIX}count:total`);
+
+      const categoryCacheKeys = await redisService.getKeys('category:*');
+      await redisService.deleteKeys(categoryCacheKeys);
+    } catch (error) {
+      console.error('Ошибка при обновлении количества фактов категории:', error);
+      throw new InternalServerError('Не удалось обновить количество фактов категории');
+    }
+  }
+
+  async recalculateAllCategoryFactsCount(): Promise<void> {
+    try {
+      const categories = await Category.find();
+
+      for (const category of categories) {
+        const count = await Fact.countDocuments({ category: category._id });
+        await Category.findByIdAndUpdate(category._id, { factsCount: count });
+      }
+
+      const factCacheKeys = await redisService.getKeys(`${this.CACHE_PREFIX}*`);
+      const categoryCacheKeys = await redisService.getKeys('category:*');
+      await redisService.deleteKeys([...factCacheKeys, ...categoryCacheKeys]);
+
+      console.log('Количество фактов для всех категорий пересчитано');
+    } catch (error) {
+      console.error('Ошибка при пересчете количества фактов категорий:', error);
+      throw new InternalServerError('Не удалось пересчитать количество фактов категорий');
+    }
+  }
+
+  async importFromExcel(
+    data: any[],
+    fieldMapping: Record<string, string>
+  ): Promise<{ success: number; errors: string[] }> {
+    try {
+      const results = { success: 0, errors: [] as string[] };
+
+      for (let i = 0; i < data.length; i++) {
+        const row = data[i];
+        const rowNumber = i + 2;
+
+        try {
+          const factData: Partial<IFact> = {};
+
+          if (fieldMapping.title && row[fieldMapping.title]) {
+            factData.title = row[fieldMapping.title].toString().trim();
+          }
+
+          if (fieldMapping.description && row[fieldMapping.description]) {
+            factData.description = row[fieldMapping.description].toString().trim();
+          }
+
+          if (fieldMapping.category && row[fieldMapping.category]) {
+            const categoryValue = row[fieldMapping.category].toString().trim();
+            const category = await Category.findOne({
+              $or: [{ name: { $regex: new RegExp(`^${categoryValue}$`, 'i') } }],
+            });
+
+            if (category) {
+              factData.category = category._id as Types.ObjectId;
+            } else {
+              results.errors.push(`Строка ${rowNumber}: Категория "${categoryValue}" не найдена`);
+              continue;
+            }
+          }
+
+          if (fieldMapping.tags && row[fieldMapping.tags]) {
+            const tagsString = row[fieldMapping.tags].toString().trim();
+            factData.tags = tagsString
+              .split(',')
+              .map((tag: string) => tag.trim())
+              .filter((tag: string) => tag.length > 0);
+          }
+
+          if (fieldMapping.image && row[fieldMapping.image]) {
+            const imageUrl = row[fieldMapping.image].toString().trim();
+            if (imageUrl) {
+              try {
+                const savedImagePath = await this.downloadAndSaveImage(imageUrl);
+                factData.image = savedImagePath;
+              } catch (error) {
+                results.errors.push(
+                  `Строка ${rowNumber}: Ошибка загрузки изображения: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`
+                );
+              }
+            }
+          }
+
+          if (!factData.title || !factData.description || !factData.category) {
+            results.errors.push(
+              `Строка ${rowNumber}: Отсутствуют обязательные поля (заголовок, описание, категория)`
+            );
+            continue;
+          }
+
+          const fact = new Fact(factData);
+          await fact.save();
+          results.success++;
+
+          await this.updateCategoryFactsCount(factData.category.toString());
+        } catch (error) {
+          console.error(`Ошибка при импорте строки ${rowNumber}:`, error);
+          results.errors.push(
+            `Строка ${rowNumber}: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`
+          );
+        }
+      }
+
+      await this.invalidateCache();
+
+      return results;
+    } catch (error) {
+      console.error('Ошибка при импорте из Excel:', error);
+      throw new InternalServerError('Не удалось импортировать данные из Excel');
+    }
   }
 }
 

@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import path from 'path';
 import { config } from './config';
 import { connectToDb } from './utils/connectToDb';
 import router from './routes/routes';
@@ -15,11 +16,16 @@ const initializeApp = async () => {
     await connectToDb();
     await redisService.init();
 
-    app.use(helmet());
+    app.use(
+      helmet({
+        crossOriginResourcePolicy: { policy: 'cross-origin' },
+      })
+    );
     app.use(
       cors({
-        origin: 'http://localhost:5173',
+        origin: '*',
         credentials: true,
+        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
       })
     );
     app.use(express.json());
@@ -32,7 +38,17 @@ const initializeApp = async () => {
     app.use('/api', router);
     app.use(errorHandler);
 
-    app.use('/api/uploads', express.static('uploads'));
+    app.use(
+      '/api/uploads',
+      (req, res, next) => {
+        res.header('Cross-Origin-Resource-Policy', 'cross-origin');
+        res.header('Access-Control-Allow-Origin', '*');
+        res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+        res.header('Access-Control-Allow-Headers', 'Content-Type');
+        next();
+      },
+      express.static('uploads')
+    );
 
     app.listen(port, () => {
       console.log(`Сервер запущен на порту ${port}`);
