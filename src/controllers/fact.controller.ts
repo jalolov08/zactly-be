@@ -6,11 +6,11 @@ import { uploadFactImage } from '../utils/upload';
 
 export const createFact = [
   uploadFactImage.single('image'),
-  validateFields(['title', 'description', 'category', 'tags']),
+  validateFields(['title', 'description', 'category']),
   asyncHandler(async (req: Request, res: Response) => {
-    const { title, description, category, tags } = req.body;
+    const { title, description, category } = req.body;
     const image = req.file ? `/uploads/facts/${req.file.filename}` : undefined;
-    const fact = await factService.create({ title, description, category, tags, image });
+    const fact = await factService.create({ title, description, category, image });
     res.status(201).json(fact);
   }),
 ];
@@ -18,13 +18,12 @@ export const createFact = [
 export const updateFact = [
   uploadFactImage.single('image'),
   asyncHandler(async (req: Request, res: Response) => {
-    const { title, description, category, tags, oldImage } = req.body;
+    const { title, description, category, oldImage } = req.body;
     const image = req.file ? `/uploads/facts/${req.file.filename}` : oldImage;
     const fact = await factService.update(req.params.id, {
       title,
       description,
       category,
-      tags,
       image,
     });
     res.status(200).json(fact);
@@ -40,12 +39,14 @@ export const deleteFact = [
 
 export const getFacts = [
   asyncHandler(async (req: Request, res: Response) => {
-    const { page, limit, search, categoryId, sortBy, sortOrder } = req.query;
+    const { page, limit, search, categoryId, startDate, endDate, sortBy, sortOrder } = req.query;
     const facts = await factService.getFacts(
       Number(page),
       Number(limit),
       search as string,
       categoryId as string,
+      startDate as string,
+      endDate as string,
       sortBy as string,
       sortOrder as 'asc' | 'desc'
     );
@@ -80,7 +81,6 @@ export const getFeed = [
     const { limit } = req.query;
     const userId = req.user?._id?.toString();
     const anonId = req.headers['x-anon-id'] as string;
-
     const feed = await factService.getFeed(Number(limit) || 10, userId, anonId);
     res.status(200).json(feed);
   }),

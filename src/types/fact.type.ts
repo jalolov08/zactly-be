@@ -5,7 +5,6 @@ export interface IFact extends Document {
   description: string;
   image?: string;
   category: Types.ObjectId;
-  tags: string[];
   createdAt: Date;
   updatedAt: Date;
 }

@@ -22,12 +22,6 @@ const factSchema = new Schema<IFact>(
       ref: 'Category',
       required: true,
     },
-    tags: [
-      {
-        type: String,
-        trim: true,
-      },
-    ],
   },
   {
     timestamps: true,
@@ -36,6 +30,5 @@ const factSchema = new Schema<IFact>(
 
 factSchema.index({ title: 'text', description: 'text' });
 factSchema.index({ category: 1 });
-factSchema.index({ tags: 1 });
 
 export const Fact = model<IFact>('Fact', factSchema);

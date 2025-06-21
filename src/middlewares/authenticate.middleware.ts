@@ -10,7 +10,7 @@ declare global {
   }
 }
 
-const handleTokenError = (error: any, res: Response) => {
+export const handleTokenError = (error: any, res: Response) => {
   if (error.name === 'TokenExpiredError') {
     res.status(401).json({
       error: 'Срок действия токена истек. Пожалуйста, войдите снова.',

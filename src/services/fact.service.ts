@@ -6,7 +6,6 @@ import { User } from '../models/user.model';
 import { ViewedFact } from '../models/viewed-fact.model';
 import { Category } from '../models/category.model';
 import { redisService } from './redis.service';
-import { categoryService } from './category.service';
 import * as fs from 'fs';
 import * as path from 'path';
 import axios from 'axios';
@@ -28,6 +27,8 @@ class FactService {
     limit: number;
     search?: string;
     categoryId?: string;
+    startDate?: string;
+    endDate?: string;
     sortBy: string;
     sortOrder: string;
   }): string {
@@ -66,13 +67,11 @@ class FactService {
 
   private async downloadAndSaveImage(imageUrl: string): Promise<string> {
     try {
-      // Create uploads directory if it doesn't exist
       const uploadsDir = path.join(__dirname, '../../uploads/facts');
       if (!fs.existsSync(uploadsDir)) {
         fs.mkdirSync(uploadsDir, { recursive: true });
       }
 
-      // Download image
       const response = await axios.get(imageUrl, {
         responseType: 'arraybuffer',
         timeout: 10000,
@@ -81,15 +80,12 @@ class FactService {
         },
       });
 
-      // Generate unique filename
       const fileExtension = this.getFileExtensionFromUrl(imageUrl);
       const filename = `import_${Date.now()}_${Math.random().toString(36).substring(7)}${fileExtension}`;
       const filePath = path.join(uploadsDir, filename);
 
-      // Save file
       fs.writeFileSync(filePath, Buffer.from(response.data as ArrayBuffer));
 
-      // Return the relative path for database storage
       return `/uploads/facts/${filename}`;
     } catch (error) {
       console.error('Error downloading image:', error);
@@ -110,7 +106,6 @@ class FactService {
         return extension;
       }
 
-      // Default to .jpg if no valid extension found
       return '.jpg';
     } catch {
       return '.jpg';
@@ -193,11 +188,22 @@ class FactService {
     limit: number,
     search?: string,
     categoryId?: string,
+    startDate?: string,
+    endDate?: string,
     sortBy: string = 'createdAt',
     sortOrder: 'asc' | 'desc' = 'desc'
   ): Promise<{ facts: IFactWithViews[]; total: number }> {
     try {
-      const cacheKey = this.getListCacheKey({ page, limit, search, categoryId, sortBy, sortOrder });
+      const cacheKey = this.getListCacheKey({
+        page,
+        limit,
+        search,
+        categoryId,
+        startDate,
+        endDate,
+        sortBy,
+        sortOrder,
+      });
       const cachedData = await redisService.get<{ facts: IFactWithViews[]; total: number }>(
         cacheKey
       );
@@ -220,6 +226,14 @@ class FactService {
           throw new BadRequestError('Неверный ID категории');
         }
         query.category = categoryId;
+      }
+
+      if (startDate) {
+        query.createdAt = { $gte: startDate };
+      }
+
+      if (endDate) {
+        query.createdAt = { $lte: endDate };
       }
 
       const skip = (page - 1) * limit;
@@ -338,9 +352,12 @@ class FactService {
       }
 
       const viewedFacts = await ViewedFact.find(userId ? { userId } : { anonId })
-        .select('factId')
+        .select('factId viewedAt')
         .lean();
       const viewedFactIds = viewedFacts.map((vf) => vf.factId);
+
+      const userPatterns = await this.getUserViewingPatterns(userId, anonId);
+      const categoryPreferences = await this.getCategoryPreferences(userId, anonId);
 
       const unviewedQuery = {
         _id: { $nin: viewedFactIds },
@@ -349,17 +366,93 @@ class FactService {
       const unviewedFacts = await Fact.find(unviewedQuery)
         .populate('category', 'name')
         .sort({ createdAt: -1 })
-        .limit(limit);
+        .limit(limit * 3);
 
-      if (unviewedFacts.length < limit) {
-        const remainingLimit = limit - unviewedFacts.length;
-        const anyFacts = await Fact.find()
-          .populate('category', 'name')
-          .sort({ createdAt: -1 })
-          .limit(remainingLimit);
-        facts = [...unviewedFacts, ...anyFacts];
+      if (unviewedFacts.length >= limit) {
+        const scoredFacts = unviewedFacts.map((fact) => {
+          const timeScore = Math.exp(
+            (-0.05 * (Date.now() - new Date(fact.createdAt).getTime())) / (1000 * 60 * 60 * 24)
+          );
+          const timeRelevance = this.calculateTimeRelevance(fact, userPatterns);
+
+          const categoryId = fact.category.toString();
+          const categoryWeight = categoryPreferences[categoryId] || 0.5;
+
+          const isInterested = user?.interests?.some(
+            (interest) => interest._id.toString() === categoryId
+          );
+
+          const finalCategoryWeight = isInterested ? categoryWeight * 1.5 : categoryWeight;
+
+          const score = finalCategoryWeight * 0.4 + timeScore * 0.3 + timeRelevance * 0.3;
+          return { fact, score };
+        });
+
+        scoredFacts.sort((a, b) => b.score - a.score);
+
+        const selectedFacts: { fact: IFact; score: number }[] = [];
+        const tempFacts = [...scoredFacts];
+
+        while (selectedFacts.length < limit && tempFacts.length > 0) {
+          const currentDiversity = this.calculateContentDiversity(selectedFacts.map((s) => s.fact));
+          const nextFact = tempFacts.shift()!;
+          const diversityBonus = currentDiversity < 0.3 ? 1.2 : 1;
+          nextFact.score *= diversityBonus;
+          selectedFacts.push(nextFact);
+        }
+
+        facts = selectedFacts.map((item) => item.fact);
       } else {
-        facts = unviewedFacts;
+        const remainingLimit = limit - unviewedFacts.length;
+
+        const viewedFactsWithData = await Fact.find({ _id: { $in: viewedFactIds } })
+          .populate('category', 'name')
+          .lean();
+
+        const viewedAtMap = new Map();
+        viewedFacts.forEach((vf) => {
+          viewedAtMap.set(vf.factId.toString(), vf.viewedAt);
+        });
+
+        const viewedFactsWithViewTime = viewedFactsWithData.map((fact) => ({
+          ...fact,
+          viewedAt: viewedAtMap.get(fact._id.toString()),
+        }));
+
+        viewedFactsWithViewTime.sort(
+          (a, b) => new Date(a.viewedAt).getTime() - new Date(b.viewedAt).getTime()
+        );
+
+        const oldViewedFacts = viewedFactsWithViewTime.slice(0, remainingLimit * 2);
+
+        const scoredViewedFacts = oldViewedFacts.map((fact) => {
+          const timeSinceViewed =
+            (Date.now() - new Date(fact.viewedAt).getTime()) / (1000 * 60 * 60 * 24);
+          const timeScore = Math.exp(-0.1 * timeSinceViewed);
+
+          const timeRelevance = this.calculateTimeRelevance(fact, userPatterns);
+
+          const categoryId = fact.category.toString();
+          const categoryWeight = categoryPreferences[categoryId] || 0.5;
+
+          const isInterested = user?.interests?.some(
+            (interest) => interest._id.toString() === categoryId
+          );
+
+          const finalCategoryWeight = isInterested ? categoryWeight * 1.5 : categoryWeight;
+
+          const randomness = 0.8 + Math.random() * 0.4;
+
+          const score =
+            (finalCategoryWeight * 0.3 + timeScore * 0.4 + timeRelevance * 0.2) * randomness;
+          return { fact, score };
+        });
+
+        scoredViewedFacts.sort((a, b) => b.score - a.score);
+
+        const selectedViewedFacts = scoredViewedFacts.slice(0, remainingLimit);
+
+        facts = [...unviewedFacts, ...selectedViewedFacts.map((item) => item.fact)];
       }
     } else {
       facts = await Fact.find().populate('category', 'name').sort({ createdAt: -1 }).limit(limit);
@@ -424,7 +517,7 @@ class FactService {
       }
 
       const viewedFacts = await ViewedFact.find(userId ? { userId } : { anonId })
-        .select('factId')
+        .select('factId viewedAt')
         .lean();
       const viewedFactIds = viewedFacts.map((vf) => vf.factId);
 
@@ -494,14 +587,7 @@ class FactService {
         .sort({ createdAt: -1 })
         .limit(limit * 3);
 
-      if (unviewedFacts.length < limit) {
-        const remainingLimit = limit - unviewedFacts.length;
-        const anyFacts = await Fact.find({ category: categoryId })
-          .populate('category', 'name')
-          .sort({ createdAt: -1 })
-          .limit(remainingLimit);
-        facts = [...unviewedFacts, ...anyFacts];
-      } else {
+      if (unviewedFacts.length >= limit) {
         const scoredFacts = unviewedFacts.map((fact) => {
           const timeScore = Math.exp(
             (-0.05 * (Date.now() - new Date(fact.createdAt).getTime())) / (1000 * 60 * 60 * 24)
@@ -525,6 +611,52 @@ class FactService {
         }
 
         facts = selectedFacts.map((item) => item.fact);
+      } else {
+        const remainingLimit = limit - unviewedFacts.length;
+
+        const viewedFactsInCategory = viewedFacts.filter((vf) => viewedFactIds.includes(vf.factId));
+
+        const viewedFactsWithData = await Fact.find({
+          _id: { $in: viewedFactsInCategory.map((vf) => vf.factId) },
+          category: categoryId,
+        })
+          .populate('category', 'name')
+          .lean();
+
+        const viewedAtMap = new Map();
+        viewedFactsInCategory.forEach((vf) => {
+          viewedAtMap.set(vf.factId.toString(), vf.viewedAt);
+        });
+
+        const viewedFactsWithViewTime = viewedFactsWithData.map((fact) => ({
+          ...fact,
+          viewedAt: viewedAtMap.get(fact._id.toString()),
+        }));
+
+        viewedFactsWithViewTime.sort(
+          (a, b) => new Date(a.viewedAt).getTime() - new Date(b.viewedAt).getTime()
+        );
+
+        const oldViewedFacts = viewedFactsWithViewTime.slice(0, remainingLimit * 2);
+
+        const scoredViewedFacts = oldViewedFacts.map((fact) => {
+          const timeSinceViewed =
+            (Date.now() - new Date(fact.viewedAt).getTime()) / (1000 * 60 * 60 * 24);
+          const timeScore = Math.exp(-0.1 * timeSinceViewed);
+
+          const timeRelevance = this.calculateTimeRelevance(fact, userPatterns);
+
+          const randomness = 0.8 + Math.random() * 0.4;
+
+          const score = (categoryWeight * 0.3 + timeScore * 0.4 + timeRelevance * 0.2) * randomness;
+          return { fact, score };
+        });
+
+        scoredViewedFacts.sort((a, b) => b.score - a.score);
+
+        const selectedViewedFacts = scoredViewedFacts.slice(0, remainingLimit);
+
+        facts = [...unviewedFacts, ...selectedViewedFacts.map((item) => item.fact)];
       }
     } else {
       facts = await Fact.find({ category: categoryId })
@@ -578,6 +710,40 @@ class FactService {
       averageViewDuration: 30,
       completionRate: 0.7,
     };
+  }
+
+  private async getCategoryPreferences(
+    userId?: string,
+    anonId?: string
+  ): Promise<Record<string, number>> {
+    const viewedFacts = await ViewedFact.find(userId ? { userId } : { anonId })
+      .sort({ viewedAt: -1 })
+      .limit(100);
+
+    if (viewedFacts.length === 0) {
+      return {};
+    }
+
+    const factIds = viewedFacts.map((vf) => vf.factId);
+    const facts = await Fact.find({ _id: { $in: factIds } })
+      .select('category')
+      .populate('category', '_id')
+      .lean();
+
+    const categoryCounts: Record<string, number> = {};
+    facts.forEach((fact) => {
+      const categoryId = fact.category.toString();
+      categoryCounts[categoryId] = (categoryCounts[categoryId] || 0) + 1;
+    });
+
+    const maxCount = Math.max(...Object.values(categoryCounts));
+    const preferences: Record<string, number> = {};
+
+    Object.entries(categoryCounts).forEach(([categoryId, count]) => {
+      preferences[categoryId] = 0.5 + (count / maxCount) * 1.0;
+    });
+
+    return preferences;
   }
 
   async getFactsCountByCategory(categoryId: string): Promise<number> {
@@ -697,14 +863,6 @@ class FactService {
               results.errors.push(`Строка ${rowNumber}: Категория "${categoryValue}" не найдена`);
               continue;
             }
-          }
-
-          if (fieldMapping.tags && row[fieldMapping.tags]) {
-            const tagsString = row[fieldMapping.tags].toString().trim();
-            factData.tags = tagsString
-              .split(',')
-              .map((tag: string) => tag.trim())
-              .filter((tag: string) => tag.length > 0);
           }
 
           if (fieldMapping.image && row[fieldMapping.image]) {
